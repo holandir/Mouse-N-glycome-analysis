@@ -1,0 +1,301 @@
+# Package names
+packages <- c("tidyverse", "pheatmap","RColorBrewer", "corrr", "ggrepel", "Rtsne", "scrime", "scales") 
+# Install packages not yet installed
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+# Packages loading
+invisible(lapply(packages, library, character.only = TRUE))
+rm(packages)
+
+#set working directory to where the files are saved
+setwd("~/Mouse-Glycome")
+
+#Load MS/MS data
+filenames_MS2 <- list.files(path = "Files/tissues_Peaks_new", full.names =  T) 
+MS2_data <- as.data.frame(readr::read_delim(filenames_MS2, id = "file_name", delim = ";")) 
+MS2_data <- MS2_data %>% mutate(M = (` Precursor mass` * ` Charge`) - (` Charge`-1) * 1.00728) %>% mutate(M = round(M, digits = 1)) # deconvolution and mass binning
+temp1 <- sub(".*new/", "\\1", MS2_data$file_name) # Get the correct Sample Names
+temp2 <- tools::file_path_sans_ext(temp1)
+MS2<- MS2_data %>%  ungroup()%>% mutate(Sample = temp2) %>% select(-file_name, -`MS2 Spectrum Title`)
+rm(temp1, temp2, filenames_MS2, MS2_data) # remove temporary data
+
+#Load the Mass List from our glycoDB
+Targeted_MassList <- read.csv("Targeted_Mass_List.csv", header = T, sep = ";") %>%  mutate(M = round(M, digits = 1)) # mass binning
+Targeted_MassList_adducts <- Targeted_MassList %>% mutate(NH4_adducts = M + 17.026548 , Na_adducts = M + 22.989768 - 1.00727, K_adducts = M + 38.963707 - 1.00727) # add adduts
+Targeted_MassList_adducts_rounded <- Targeted_MassList_adducts %>%
+  mutate(M = round(M, digits = 1), M_NH4 = round(NH4_adducts, digits = 1),M_Na = round(Na_adducts, digits = 1),M_K = round(K_adducts, digits = 1)) # mas-binning
+
+#Load Mass List for oligomannosidic N-glycans
+HighMan_ML <- read.csv("Files/HighMan_MassList.csv", header = T, sep = ";") %>%  mutate(M = round(M, digits = 1)) # mass-binning
+
+
+
+#Load Decon2 processed MS1 data
+filenames <- list.files(path = "Files/DeCon2_processed/isos", full.names =  T) 
+data <- as.data.frame(read_csv(filenames, id = "Sample"))%>% filter(signal_noise > 10) # filter signals with S/N < 10
+
+#Function to extract the information from the MS1 data
+Selector <-  function(x) {
+  a <- x %>%  filter(monoisotopic_mw > 750) %>% # Only masses > 750 amu
+    mutate(M = round(monoisotopic_mw + 1.00728, digits = 1)) %>% # mass-binning
+    group_by(Sample, M) %>%
+    summarize(intensity = sum(abundance)) # Summing up the mass-bin intensities over the whole chromatographic range
+}
+
+temp <- Selector(data) #apply function
+
+#Get the correct Sample Names
+temp2 <- sub(".*isos/", "\\1", temp$Sample) 
+temp3 <- tools::file_path_sans_ext(temp2)  
+temp4 <- temp %>%  ungroup()%>% mutate(Sample = temp3)
+
+rm(temp, temp2,temp3) # remove temporary data
+
+
+Processed_MS2 <-MS2  %>%  mutate(BPI = as.numeric(BPI),
+                                             X224_norm = `224.1118`/BPI,
+                                             X542_norm = `542.1716`/BPI,
+                                             X274_norm = `274.0921`/BPI,
+                                             X292_norm = `292.1027`/BPI,
+                                             X512_norm = `512.1974`/BPI,
+                                             X308_norm = `308.0976`/BPI,
+                                             X290_norm = `290.087`/BPI,
+                                             X528_norm = `528.1923`/BPI,
+                                             X284_norm = `284.0435`/BPI,
+                                             X243_norm = `243.0264`/BPI,
+                                             X792_norm = `792.3234`/BPI,
+                                             X948_norm = `948.3303`/BPI,
+                                             X495_norm = `495.1821`/BPI,
+                                             X553_norm = `553.224`/BPI,
+                                             X407_norm = `407.1661`/BPI,
+                                             X350_norm = `350.1082`/BPI,
+                                             X332_norm = `332.0976`/BPI,
+                                             X657_norm = `657.2349`/BPI,
+                                             X511_norm = `511.177`/BPI,
+                                             X980_norm = `980.3201`/BPI,
+                                             X714_norm = `714.2564`/BPI,
+                                             X698_norm = `698.2615`/BPI,
+                                             X334_norm = `334.1133`/BPI,
+                                             X316_norm = `316.1027`/BPI,
+                                             X715_norm = `715.2404`/BPI,
+                                             X699_norm = `699.2455`/BPI,
+                                             X698_norm = `698.2615`/BPI,
+                                             X658_norm = `658.2553`/BPI,
+                                             X803_norm = `803.2928`/BPI,
+                                             X860_norm = `860.31427`/BPI,
+                                             X569_norm = `569.21887`/BPI) %>% group_by(Sample, M) %>%
+  summarize(SNOGscore = sum(X224_norm)/n(),   #These are the eSNOG_scores used for stratification of the data based on sub-strucutral features
+            Summed542 = sum(X542_norm)/n(),   #The name is based on the respective diagnostic fragment ion of interest
+            Summed274 = sum(X274_norm)/n(),   #See Supplmentary Table 1 for further information
+            Summed292 = sum(X292_norm)/n(),
+            Summed512 = sum(X512_norm)/n(),
+            Summed308 = sum(X308_norm)/n(),
+            Summed290 = sum(X290_norm)/n(),
+            Summed528 = sum(X528_norm)/n(),
+            Summed284 = sum(X284_norm)/n(),
+            Summed243 = sum(X243_norm)/n(),
+            Summed792 = sum(X792_norm)/n(),
+            Summed948 = sum(X948_norm)/n(),
+            Summed495 = sum(X495_norm)/n(),
+            Summed553 = sum(X553_norm)/n(),
+            Summed407 = sum(X407_norm)/n(),
+            Summed350 = sum(X350_norm)/n(),
+            Summed332 = sum(X332_norm)/n(),
+            Summed657 = sum(X657_norm)/n(),
+            Summed511 = sum(X511_norm)/n(),
+            Summed980 = sum(X980_norm)/n(),
+            Summed714 = sum(X714_norm)/n(),
+            Summed698 = sum(X698_norm)/n(),
+            Summed334 = sum(X334_norm)/n(),
+            Summed316 = sum(X316_norm)/n(),
+            Summed715 = sum(X715_norm)/n(),
+            Summed699 = sum(X699_norm)/n(),
+            Summec698 = sum(X698_norm)/n(),
+            Summed658 = sum(X658_norm)/n(),
+            Summed803 = sum(X803_norm)/n(),
+            Summed860 = sum(X860_norm)/n(),
+            Summed569 = sum(X569_norm)/n())
+
+MS1_MS2_combined  <- inner_join(Processed_MS2, temp4, by = c("Sample",  "M")) %>% #Combine MS1 and MS2 data
+                filter(intensity >  5 *  10^6, # exclude signals with a cumulative intensity of < 5*10^6
+                        SNOGscore > 0.03) #Exclude mass-bins with a SNOGscore < 0.03
+
+rm(temp4) # remove temporary data
+
+#Visualization of dimensionality reduced LC-MS data 
+MS1_MS2_combined %>%
+  filter(Sample == "liver1", # put Sample of interest here
+         Summed290 > 0.05, Summed308 > 0.025) %>%  #put eSNOG-score cut-pff of interest here, the cut-off values are found in the Supplementary table 1
+  ggplot(aes(M, intensity)) +
+  geom_col(width = 8) +
+  xlim(700, 4000) + # put the mass-range o interest here
+  theme_classic() +
+  ylab("Intensity") +
+  xlab("[M+H]+") +
+  geom_hline(yintercept = 0) +
+  geom_text(aes(label = ifelse(intensity > 10^9, M, "")), vjust = -0.5, size = 3, position = "dodge") + #put the threshhold for naming the mass-bins here
+  ggtitle("") +
+  theme(legend.position = "none") +
+  theme(text = element_text(size = 10))
+
+
+
+###Calculation of the Total ion currents of respective modifications
+TIC_Neu5Ac <- MS1_MS2_combined%>% filter(Summed274 > 0.05, Summed292 > 0.025) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_Fucosylation <- MS1_MS2_combined %>% filter(Summed512 > 0.075) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_total <- MS1_MS2_combined %>% filter() %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_sulphation <- MS1_MS2_combined %>% filter(Summed284 > 0.01) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_Neu5Gc <- MS1_MS2_combined %>% filter(Summed290 > 0.05, Summed308 > 0.025) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_HNK1 <- MS1_MS2_combined %>% filter(Summed542 > 0.05) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_DiNeu5Ac <- MS1_MS2_combined %>% filter(Summed495 > 0.025, Summed948 > 0.01) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_Neu5Ac_acetylated <- MS1_MS2_combined %>% filter(Summed334 > 0.005, Summed316 > 0.005) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_Neu5Gc_acetylated <- MS1_MS2_combined %>% filter(Summed350 > 0.005, Summed332 > 0.005) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_alpha_Gal <- MS1_MS2_combined %>% filter(Summed528 > 0.35) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_oligoMan <-  MS1_MS2_combined %>% filter(M %in% HighMan_ML$M) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_DiNeu5Gc <- MS1_MS2_combined %>% filter(Summed511 > 0.025, Summed980 > 0.01) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_LacdiNAc_Fuc <- MS1_MS2_combined %>% filter(Summed407 > 0.04, Summed553 > 0.01) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_Neu5Gc_Neu5Ac <- MS1_MS2_combined %>% filter(Summed290 > 0.05, Summed274 > 0.05) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_Neu5Ac_Fuc <- MS1_MS2_combined %>% filter(Summed274 > 0.05, Summed512 > 0.075) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_sialylation <-  MS1_MS2_combined %>% filter(Summed274 > 0.05 | Summed290 > 0.05) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_Acetylated <-  MS1_MS2_combined %>% filter(Summed334 > 0.005 & Summed316 > 0.005 | Summed350 > 0.005 & Summed332 > 0.005) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_branchingNeu5Ac <-  MS1_MS2_combined %>% filter(Summed495 > 0.025) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_Neu5Ac_LacdiNAc <-  MS1_MS2_combined %>% filter(Summed698 > 0.01) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_LacdiNAc <-  MS1_MS2_combined %>% filter(Summed407 > 0.05) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_LewisY <-  MS1_MS2_combined %>% filter(Summed512 > 0.2, Summed658 > 0.07) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_branchingNeu5Gc <-  MS1_MS2_combined %>% filter(Summed511 > 0.025) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_bisecting <-  MS1_MS2_combined%>% filter(Summed792 > 0.02) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+TIC_neutral <-  MS1_MS2_combined %>% filter(Summed274 < 0.05, Summed292 < 0.025, Summed512 < 0.075, Summed308 < 0.025, Summed290 < 0.05, Summed528 < 0.35 ) %>% filter(!(M %in% HighMan_ML$M)) %>% group_by(Sample) %>% summarize(TIC = sum(intensity))%>% arrange(Sample)
+
+#Fill missing values
+TIC_Fucosylation <- complete(TIC_Fucosylation, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample) ###fill missing values with 0
+TIC_sulphation <- complete(TIC_sulphation, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_HNK1 <- complete(TIC_HNK1, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_DiNeu5Ac <- complete(TIC_DiNeu5Ac, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_Neu5Ac_acetylated <- complete(TIC_Neu5Ac_acetylated, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_Neu5Gc_acetylated <- complete(TIC_Neu5Gc_acetylated, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_DiNeu5Gc <- complete(TIC_DiNeu5Gc, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_LacdiNAc_Fuc <- complete(TIC_LacdiNAc_Fuc, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_Neu5Ac_Fuc <- complete(TIC_Neu5Ac_Fuc, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_Acetylated <- complete(TIC_Acetylated, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_branchingNeu5Ac <- complete(TIC_branchingNeu5Ac, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_branchingNeu5Gc <- complete(TIC_branchingNeu5Gc, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_bisecting <- complete(TIC_bisecting, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_alpha_Gal <- complete(TIC_alpha_Gal, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_Neu5Gc_Neu5Ac <- complete(TIC_Neu5Gc_Neu5Ac, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_Neu5Ac_LacdiNAc <- complete(TIC_Neu5Ac_LacdiNAc, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_LacdiNAc <- complete(TIC_LacdiNAc, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+TIC_LewisY <- complete(TIC_LewisY, Sample = TIC_Neu5Ac$Sample, fill = list(TIC = 0))%>% arrange(Sample)
+
+#Normalize the data to the total glyco-TIC
+TIC_all <- TIC_total %>%
+  mutate(Neu5Ac = TIC_Neu5Ac$TIC, Fucosylation = TIC_Fucosylation$TIC, Sulphate = TIC_sulphation$TIC, Neu5Gc = TIC_Neu5Gc$TIC, HNK1 = TIC_HNK1$TIC,
+         DiNeu5Ac = TIC_DiNeu5Ac$TIC, Neu5Ac_acetylated = TIC_Neu5Ac_acetylated$TIC, Neu5Gc_acetylated = TIC_Neu5Gc_acetylated$TIC, alpha_Gal = TIC_alpha_Gal$TIC, OligoMan = TIC_oligoMan$TIC,
+         DiNeu5Gc = TIC_DiNeu5Gc$TIC, LacdiNac_Fuc = TIC_LacdiNAc_Fuc$TIC, Neu5Ac_Neu5Gc = TIC_Neu5Gc_Neu5Ac$TIC, Neu5Ac_Fuc = TIC_Neu5Ac_Fuc$TIC,
+         Sialylation = TIC_sialylation$TIC, Acetylated = TIC_Acetylated$TIC, branchingNeu5Ac = TIC_branchingNeu5Ac$TIC, branchingNeu5Gc = TIC_branchingNeu5Gc$TIC,
+         bisecting = TIC_bisecting$TIC, neutral = TIC_neutral$TIC, Neu5Ac_LacdiNAc = TIC_Neu5Ac_LacdiNAc$TIC, LacdiNAc = TIC_LacdiNAc$TIC, LewisY = TIC_LewisY$TIC) %>%
+  mutate(Neu5Ac_norm = Neu5Ac/TIC, Fucosylation_norm = Fucosylation/TIC, Sulphate_norm = Sulphate/TIC, Neu5Gc_norm = Neu5Gc/TIC, HNK1_norm = HNK1/TIC,
+         DiNeu5Ac_norm = DiNeu5Ac/TIC, Neu5Ac_acetylated_norm = Neu5Ac_acetylated/TIC, Neu5Gc_acetylated_norm = Neu5Gc_acetylated/TIC, alpha_Gal_norm = alpha_Gal/TIC, oligoMan_norm = OligoMan/TIC,
+         DiNeu5Gc_norm =DiNeu5Gc/TIC, LacDiNAc_Fuc_norm = LacdiNac_Fuc/TIC, Neu5Ac_Neu5Gc_norm = Neu5Ac_Neu5Gc/TIC, Neu5Ac_Fuc_norm = Neu5Ac_Fuc/TIC,
+         Sialylation_norm = Sialylation/TIC, Acetylated_norm= Acetylated/TIC, branchingNeu5Ac_norm = branchingNeu5Ac/TIC, branchingNeu5Gc_norm = branchingNeu5Gc/TIC,
+         bisecting_norm = bisecting/TIC, neutral_norm = neutral/TIC, Neu5Ac_LacdiNAc_norm = Neu5Ac_LacdiNAc/TIC, LacdiNAc_norm = LacdiNAc/TIC, LewisY_norm = LewisY/TIC) %>%
+  select(- Neu5Ac, - Fucosylation, - Sulphate, - TIC, - Neu5Gc, - HNK1, - DiNeu5Ac, - Neu5Ac_acetylated, - Neu5Gc_acetylated, - alpha_Gal, - OligoMan, - DiNeu5Gc,-LacdiNac_Fuc,
+         - Neu5Ac_Neu5Gc, - Neu5Ac_Fuc, - Sialylation, - Acetylated, - branchingNeu5Ac, - branchingNeu5Gc, - bisecting, - neutral, - Neu5Ac_LacdiNAc, - LacdiNAc, - LewisY)%>%
+  mutate(tissue = str_extract(Sample, "^\\D+")) # get the tissue name, remove the replicate number
+
+#Create a long data frame for ggplot
+TIC_all_gathered <- gather(TIC_all, key = "Modification" , value = "TIC_intensity", 2:24) 
+
+
+#Visualize the abundacies of the respective modifications across all tissues
+TIC_all_gathered %>%
+  filter(Modification %in% c("HNK1_norm")) %>% #Insert name of modification of interest here, as specified in the TIC_all dataframe
+  filter() %>% #Exclude tissues/samples here if necessary
+  ggplot(aes(tissue, TIC_intensity, fill = Modification)) +
+  geom_col(alpha = 0.8, position = "dodge2", color = "black") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust = 1)) +
+  scale_fill_manual(values = c("darkgreen")) +
+  geom_col(position = "dodge2") +
+  theme_light() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  theme(legend.position = "none") +
+  xlab("") +
+  ylab("")
+
+#Visualize different modifications of interest within one tissue
+TIC_all_gathered %>%
+  filter(Modification %in% c("Neu5Ac_norm", "Neu5Gc_norm", "Fucosylation_norm", "alpha_Gal_norm", "oligoMan_norm", "neutral_norm")) %>% #Type in modifications of interest
+  filter(tissue == "kidney") %>% #Type in tissue of interest
+  ggplot(aes(Modification, TIC_intensity, fill = Modification, position = Sample)) +
+  geom_col(position = "dodge2", col = "black") +
+  theme_bw() +
+  theme(legend.position = "none") +
+  xlab("") +
+  ylab("") +
+  scale_fill_manual(values = c("orange", "red", "purple", "lightblue", "green", "black")) 
+
+
+
+#Correlation analysis
+
+temp_correlation1 <- MS1_MS2_combined %>% select(Sample, M, intensity) # select only columns of interest
+Cor_data <- pivot_wider(temp_correlation1, names_from = Sample, values_from = intensity, values_fill = 0) %>% #create a wide data frame
+  select(-M, -BAT1, -BAT2, -stomach1, -stomach2) %>%
+  ungroup()
+
+Cor_data_new <- as.data.frame(apply(Cor_data, 2, function  (x) {x/sum(x)}) )#Function for nomalization to glyco-TIC (normalization to Base Peak intensity can be done by changing sum() to max())
+cor_data_final <- cor(Cor_data_new, method = "pearson")  # calculate correlation matrix with pearson´s coefficient
+
+#visualize correlation matrix
+pheatmap(cor_data_final,
+  fontsize = 10, clustering_distance_rows = "correlation", clustering_distance_cols = "correlation", cluster_rows = F, cluster_cols = F,
+  clustering_method = "ward.D2", cutree_cols = 11, legend = F
+)
+
+
+
+#Clustering and tSNE analysis
+tSNE_data <- MS1_MS2_combined %>%
+  select(intensity, M, Sample) %>% # select columns of interest
+  filter(Sample != "BAT1", Sample != "BAT2", Sample != "stomach1", Sample != "stomach2") # remove sample, if necessary
+
+tSNE_data <- t(as.matrix(pivot_wider(tSNE_data, names_from = Sample, values_from = intensity, id_expand = T) %>% mutate_all(~ replace(., is.na(.), 0)) %>% mutate_if(is.character, as.numeric) %>% select(-M)))
+colnames(tSNE_data) <- tSNE_data[1, ] # get the data in the correct format for analyis
+temp1 <- rowScales(tSNE_data)
+tissues <- row.names(tSNE_data)
+
+#perform tSNE-analysis
+set.seed(20)
+tsne_out <- Rtsne(temp1, perplexity = 2, pca = T, theta = 0, normalize = T, eta = 1000, max_iter = 10000)
+
+#perform hierarchical cluster analysis
+## keeping original data
+d_tsne_1_original <- data.frame(
+  x = tsne_out$Y[, 1],
+  y = tsne_out$Y[, 2]
+)
+
+d_tsne_1_mod <- data.frame(
+  x = tsne_out$Y[, 1],
+  y = tsne_out$Y[, 2]
+)
+
+
+
+## Creating hierarchical cluster model, and assigning the result to the data used to create the tsne
+fit_cluster_hierarchical <- hclust(dist(scale((d_tsne_1_original)), method = "euclidean"), method = "ward.D2") # clustering based on tSNE values
+
+## setting 7 clusters as output
+d_tsne_1_original$cl_hierarchical <- factor(cutree(fit_cluster_hierarchical, k = 7))
+
+# Visualization of the tSNE data with hierarchical clustering in the color dimension
+d_tsne_1_original %>%
+  mutate(Sample = tissues) %>%
+  ggplot(aes(x, y, col = cl_hierarchical)) +
+  geom_point(size = 3) +
+  geom_text_repel(aes(label = tissues)) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  scale_colour_brewer(palette = "Dark2")
