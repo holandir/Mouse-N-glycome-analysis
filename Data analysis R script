@@ -13,7 +13,7 @@ rm(packages)
 setwd("~/Mouse-Glycome")
 
 #Load MS/MS data
-filenames_MS2 <- list.files(path = "Files/tissues_Peaks_new", full.names =  T) 
+filenames_MS2 <- list.files(path = "MS2 data", full.names =  T) 
 MS2_data <- as.data.frame(readr::read_delim(filenames_MS2, id = "file_name", delim = ";")) 
 MS2_data <- MS2_data %>% mutate(M = (` Precursor mass` * ` Charge`) - (` Charge`-1) * 1.00728) %>% mutate(M = round(M, digits = 1)) # deconvolution and mass binning
 temp1 <- sub(".*new/", "\\1", MS2_data$file_name) # Get the correct Sample Names
