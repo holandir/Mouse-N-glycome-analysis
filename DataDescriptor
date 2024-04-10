@@ -1,0 +1,124 @@
+# R script for the analysis of the mouse N-glycome LC-MS/MS data set
+# Download the files from the "MS2 data" folder
+
+#set working directory to where the  downloaded files are saved
+setwd("~/Mouse-Glycome")
+
+#install and load required package
+install.packages("tidyverse")
+library(tidyverse)
+
+#Load MS/MS data
+filenames_MS2 <- list.files(path = "MS2 data", full.names =  T) 
+MS2_data <- as.data.frame(readr::read_delim(filenames_MS2, id = "file_name", delim = ";")) 
+MS2_data <- MS2_data %>% mutate(M = (` Precursor mass` * ` Charge`) - (` Charge`-1) * 1.00728) %>% mutate(M = round(M, digits = 1)) # deconvolution and rounding
+temp1 <- sub(".*new/", "\\1", MS2_data$file_name) # Get the correct Sample Names
+temp2 <- tools::file_path_sans_ext(temp1)
+MS2<- MS2_data %>%  ungroup()%>% mutate(Sample = temp2) %>% select(-file_name, -`MS2 Spectrum Title`)
+rm(temp1, temp2, filenames_MS2, MS2_data) # remove temporary data
+
+#extract the tissue name (not required)
+GlycoMS2 <- MS2 %>% mutate(tissue = str_extract(Sample, "^\\D+")) 
+
+#Create Histograms for the visualisation of all MS/MS spectra (black) and Glyco-associated MS/MS spectra, containing a diagnostic fragment ion for reduced HexNAc (224.1 amu)(blue)
+ggplot() +
+  geom_histogram(data = GlycoMS2, aes(as.numeric(Retention.Time) / 60), binwidth = 0.3, fill = "black", alpha = 0.15) +
+  geom_histogram(data = GlycoMS2[which(GlycoMS2$`X224.1118` > 0), ], aes(as.numeric(Retention.Time) / 60), binwidth = 0.3, fill = "blue", alpha = 1) +
+  facet_wrap(~Sample, nrow = 8, ncol = 5) +
+  xlim(10, 50) +
+  theme_bw() +
+  xlab("Retention Time [min]") +
+  theme(axis.text = element_text(size = 9), strip.text = element_text(size = 9)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+#Create Histograms for the visualisation of MS/MS spectra containing a diagnostic fragment ion for Neu5Gc (308.1 amu) (turquoise) and Glyco-associated MS/MS spectra (black)
+ggplot() +
+  geom_histogram(data = GlycoMS2[which(GlycoMS2$`X224.1118` > 0), ], aes(as.numeric(Retention.Time) / 60), binwidth = 0.5, fill = "black", alpha = 0.15) +
+  geom_histogram(data = GlycoMS2[which(GlycoMS2$`X308.0976` > 0), ], aes(as.numeric(Retention.Time) / 60), binwidth = 0.5, fill = "turquoise2", alpha = 1) +
+  facet_wrap(~Sample, nrow = 4, ncol = 10) +
+  xlim(10, 50) +
+  theme_bw() +
+  xlab("Retention Time [min]") +
+  theme(axis.text = element_text(size = 8), strip.text = element_text(size = 7)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+#Create Histograms for the visualisation of MS/MS spectra containing a diagnostic fragment ion for Neu5Gc (292.1 amu) (purple) and Glyco-associated MS/MS spectra (black)
+ggplot() +
+  geom_histogram(data = GlycoMS2[which(GlycoMS2$`X224.1118` > 0), ], aes(as.numeric(Retention.Time) / 60), binwidth = 0.5, fill = "black", alpha = 0.15) +
+  geom_histogram(data = GlycoMS2[which(GlycoMS2$`X292.1027` > 0), ], aes(as.numeric(Retention.Time) / 60), binwidth = 0.5, fill = "purple", alpha = 1) +
+  facet_wrap(~Sample, nrow = 4, ncol = 10) +
+  xlim(10, 50) +
+  theme_bw() +
+  xlab("Retention Time [min]") +
+  theme(axis.text = element_text(size = 8), strip.text = element_text(size = 7)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+#Create Histograms for the visualisation of MS/MS spectra containing a diagnostic fragment ion for fucose (Fucose-HexNAc-Hex) (512.2 amu) (red) and Glyco-associated MS/MS spectra (black)
+ggplot() +
+  geom_histogram(data = GlycoMS2[which(GlycoMS2$`X224.1118` > 0), ], aes(as.numeric(Retention.Time) / 60), binwidth = 0.5, fill = "black", alpha = 0.15) +
+  geom_histogram(data = GlycoMS2[which(GlycoMS2$`X512.1974` > 0), ], aes(as.numeric(Retention.Time) / 60), binwidth = 0.5, fill = "red", alpha = 1) +
+  facet_wrap(~Sample, nrow = 4, ncol = 10) +
+  xlim(10, 50) +
+  theme_bw() +
+  xlab("Retention Time [min]") +
+  theme(axis.text = element_text(size = 8), strip.text = element_text(size = 7)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+#Count the number of glyco-associated MS/MS spectra
+numbers <- GlycoMS2 %>% group_by(Sample) %>% count() %>% ungroup()
+numbers_Glyco <- GlycoMS2 %>% filter(X224.1118 > 0) %>% group_by(Sample) %>% count()
+ratio <- numbers_Glyco$n/numbers$n #calculate the ratio between glyco-associated MS/MS spectra and all MS/MS spectra
+number_all <- numbers %>% mutate(ratio = ratio) %>% mutate(tissue = str_extract(Sample, "^\\D+"))
+
+#Visualization of the ratios
+number_all %>% ggplot(aes(Sample, ratio, fill = "1", col = "2")) + geom_col()  +
+  scale_fill_manual(values=c("forestgreen"))  + 
+  scale_color_manual(values=c("black"))  +
+  geom_col(position = "dodge2")+ theme_classic() + theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=1))  +  
+  theme(legend.position="none") + xlab("") + geom_hline(yintercept = 0) + ylab("Ratio") +
+  theme(axis.text=element_text(size=11), axis.title = element_text(size=12))
+
+
+#MS1 data processing
+
+# Load mass list for targeted analysis (Provided on GitHub repository)
+Targeted_MassList <- read.csv("Targeted_Mass_List.csv", header = T, sep = ";")
+Targeted_MassList_adducts <- Targeted_MassList %>% mutate(NH4_adducts = M + 17.026548, Na_adducts = M + 22.989768 - 1.00727, K_adducts = M + 38.963707 - 1.00727) # add relevant adducts
+Targeted_MassList_adducts_rounded <- Targeted_MassList_adducts %>%
+  mutate(M = round(M, digits = 1), M_NH4 = round(NH4_adducts, digits = 1), M_Na = round(Na_adducts, digits = 1), M_K = round(K_adducts, digits = 1)) # create 0.1 Da wide mass bins by rounding
+
+# Load Decon2 processed MS1 data (subdirectory: MS1_data)
+filenames <- list.files(path = "Files/DeCon2_processed/isos", full.names =  T) 
+data <- as.data.frame(read_csv(filenames, id = "Sample"))
+data <- data %>% filter(signal_noise > 10) # remove signals with a signal to noise ratio smaller than 10)
+
+##function to select Sample, abundance, scan_num, monoisotopic_mw
+Selector <-  function(x) {
+  a <- x %>%  filter(monoisotopic_mw > 1000) %>%
+    mutate(M = round(monoisotopic_mw + 1.00728, digits = 1)) %>%
+    group_by(Sample, M) %>%
+    summarize(intensity = sum(abundance))
+}
+
+temp <- Selector(data) # apply processing
+temp2 <- sub(".*isos/", "\\1", temp$Sample) # remove stuff before the Sample name
+temp3 <- tools::file_path_sans_ext(temp2) # remove file extension, in this case .csv
+MS1 <- temp %>%
+  ungroup() %>%
+  mutate(Sample = temp3) # bring Sample name back to dataframe
+MS1_matched <- MS1 %>% mutate(match = ifelse(M %in% Targeted_Mass_List_rounded$M | M %in%
+                                               Targeted_MassList_adducts_rounded$M_NH4 | M %in%
+                                               Targeted_MassList_adducts_rounded$M_Na | M %in%
+                                               Targeted_MassList_adducts_rounded$M_K, 1, 0)) #add a "matched" variable (meaning that the respective mass has a match in the targeted mass list)
+
+#calculate Ion current derived from matched and non matched signals
+TIC_matched <- MS1_matched %>%
+  filter(intensity >= 5 * 10^6) %>% #remove signals with a intensity smaller than 5 + 10^6
+  group_by(Sample, match) %>%
+  summarize(TIC = sum(intensity)) #calculate the ion current derived from the masses with an entry in the targetetd mass list
+
+#Visualization of the ion  stratified into signals that have an entry in the targeted mass list(green) and signals which do not have an entry in our targeted mass list (orange)
+TIC_matched %>% ggplot(aes(Sample, TIC, fill = as.character(match))) + geom_col(position = "dodge", col = "black") + 
+  theme_cowplot(12)  + theme(text = element_text(size=16), axis.text.x = element_text(angle=90, hjust=1, vjust = 0.5)) +
+  xlab("")  + scale_fill_manual(values = c("darkorange","forestgreen")) + theme(axis.text=element_text(size=13), axis.title = element_text(size=12)) + ylab("Ion Current intensity") +
+  theme(legend.position="none")
